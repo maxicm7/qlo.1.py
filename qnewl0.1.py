@@ -6,7 +6,7 @@ from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import time
 
-# Necesitas instalar deap si no lo tienes: pip install deap
+# pip install deap
 from deap import base, creator, tools, algorithms
 
 # --- Configuración Inicial DEAP ---
@@ -23,14 +23,20 @@ def load_data_and_counts(uploaded_file):
         df = pd.read_csv(uploaded_file)
         if 'Numero' not in df.columns or 'Atraso' not in df.columns or 'Frecuencia' not in df.columns:
             st.error("El archivo debe contener las columnas 'Numero', 'Atraso' y 'Frecuencia'."); return None, {}, {}, {}, [], {}, 0, {}
-        df['Numero'] = pd.to_numeric(df['Numero'], errors='coerce'); df['Atraso'] = pd.to_numeric(df['Atraso'], errors='coerce'); df['Frecuencia'] = pd.to_numeric(df['Frecuencia'], errors='coerce')
+        df['Numero'] = pd.to_numeric(df['Numero'], errors='coerce')
+        df['Atraso'] = pd.to_numeric(df['Atraso'], errors='coerce')
+        df['Frecuencia'] = pd.to_numeric(df['Frecuencia'], errors='coerce')
         df.dropna(subset=['Numero', 'Atraso', 'Frecuencia'], inplace=True)
-        df['Numero'], df['Atraso'], df['Frecuencia'] = df['Numero'].astype(int).astype(str), df['Atraso'].astype(int), df['Frecuencia'].astype(int)
+        df['Numero'] = df['Numero'].astype(int).astype(str)
+        df['Atraso'] = df['Atraso'].astype(int)
+        df['Frecuencia'] = df['Frecuencia'].astype(int)
         st.success("Archivo de datos cargado exitosamente.")
-        numero_a_atraso = dict(zip(df['Numero'], df['Atraso'])); numero_a_frecuencia = dict(zip(df['Numero'], df['Frecuencia']))
-        atrasos_disponibles_int = sorted(df['Atraso'].unique()); numeros_validos = list(numero_a_atraso.keys())
+        numero_a_atraso = dict(zip(df['Numero'], df['Atraso']))
+        numero_a_frecuencia = dict(zip(df['Numero'], df['Frecuencia']))
+        atrasos_disponibles_int = sorted(df['Atraso'].unique())
+        numeros_validos = list(numero_a_atraso.keys())
         distribucion_probabilidad = {num: 1.0/len(numeros_validos) for num in numeros_validos} if numeros_validos else {}
-        atraso_counts = df['Atraso'].value_counts().to_dict() # Se mantiene str como key para la UI
+        atraso_counts = df['Atraso'].value_counts().to_dict() 
         atraso_stats = {"min": df['Atraso'].min(), "max": df['Atraso'].max(), "p25": df['Atraso'].quantile(0.25), "p75": df['Atraso'].quantile(0.75)}
         total_atraso_dataset = df['Atraso'].sum()
         return df, numero_a_atraso, numero_a_frecuencia, distribucion_probabilidad, atrasos_disponibles_int, atraso_counts, total_atraso_dataset, atraso_stats
@@ -75,7 +81,8 @@ def analyze_historical_delay_cv(historical_sets, numero_a_atraso):
 @st.cache_data
 def analyze_historical_structure(historical_sets):
     if not historical_sets: return None, None, None
-    sums = [sum(s) for s in historical_sets]; parity_counts = Counter(sum(1 for num in s if num % 2 == 0) for s in historical_sets)
+    sums = [sum(s) for s in historical_sets]
+    parity_counts = Counter(sum(1 for num in s if num % 2 == 0) for s in historical_sets)
     consecutive_counts = []
     for s in historical_sets:
         nums = sorted(list(s)); max_consecutive = 0; current_consecutive = 1
@@ -86,22 +93,9 @@ def analyze_historical_structure(historical_sets):
     sum_stats = {"min": int(np.min(sums)), "max": int(np.max(sums)), "mean": np.mean(sums), "std": np.std(sums)}
     return sum_stats, parity_counts, Counter(consecutive_counts)
 
-@st.cache_data
-def analyze_historical_composition(historical_sets, numero_a_atraso, composicion_ranges):
-    if not historical_sets: return None
-    def get_category(atraso, ranges):
-        if ranges['caliente'][0] <= atraso <= ranges['caliente'][1]: return 'caliente'
-        elif ranges['tibio'][0] <= atraso <= ranges['tibio'][1]: return 'tibio'
-        elif ranges['frio'][0] <= atraso <= ranges['frio'][1]: return 'frio'
-        elif atraso >= ranges['congelado'][0]: return 'congelado'
-        return 'otro'
-    counts = Counter(tuple(Counter(get_category(numero_a_atraso.get(str(num), -1), composicion_ranges) for num in s).get(cat, 0) for cat in ['caliente', 'tibio', 'frio', 'congelado']) for s in historical_sets)
-    return counts if counts else None
-    
-# --- NUEVO: Función para puntuar y rankear las combinaciones ---
+# --- Función para puntuar y rankear las combinaciones ---
 def score_and_rank_combinations(combinations, num_a_atraso, num_a_freq, total_atraso, atraso_counts_int, historical_stats):
     scored_combinations = []
-    
     means = {key: stats['mean'] for key, stats in historical_stats.items() if stats and 'mean' in stats}
     stds = {key: stats['std'] for key, stats in historical_stats.items() if stats and 'std' in stats}
     
@@ -139,44 +133,171 @@ def score_and_rank_combinations(combinations, num_a_atraso, num_a_freq, total_at
         
     return sorted(scored_combinations, key=lambda x: x["Puntuación"], reverse=True)
 
-
-# --- Motores de Generación y Filtrado ---
+# --- Motores de Generación y Filtrado (Completados) ---
 def generar_combinaciones_con_restricciones(params):
-    # ... (código sin cambios)
-    pass
+    dist_prob, num_a_atraso, num_a_freq, restricciones_finales, n_selecciones, sim_n_comb, historical_combinations_set, total_atraso, special_calc_range, freq_cv_range, sum_range, parity_counts_allowed, max_consecutive_allowed, hist_similarity_threshold, delay_cv_range = params
+    
+    numeros = list(dist_prob.keys())
+    probabilidades = list(dist_prob.values())
+    valid_combos = []
+
+    for _ in range(sim_n_comb):
+        combo = np.random.choice(numeros, size=n_selecciones, replace=False, p=probabilidades)
+        combo = [int(x) for x in combo]
+        
+        # Filtro Suma
+        suma = sum(combo)
+        if not (sum_range[0] <= suma <= sum_range[1]): continue
+            
+        # Filtro CV Atraso
+        atrasos = [num_a_atraso.get(str(n), 0) for n in combo]
+        cv_atraso = np.std(atrasos) / np.mean(atrasos) if np.mean(atrasos) > 0 else 0
+        if not (delay_cv_range[0] <= cv_atraso <= delay_cv_range[1]): continue
+            
+        valid_combos.append((combo, 0)) # 0 es un placeholder de score
+    
+    return valid_combos
 
 def procesar_combinaciones(params_tuple, n_ejec):
-    # ... (código sin cambios)
-    pass
+    resultados = []
+    with ProcessPoolExecutor() as executor:
+        futures = [executor.submit(generar_combinaciones_con_restricciones, params_tuple) for _ in range(n_ejec)]
+        for future in as_completed(futures):
+            resultados.append(future.result())
+    return resultados
 
 def filtrar_por_composicion(combinaciones, numero_a_atraso, composicion_rules):
-    # ... (código sin cambios)
-    pass
+    filtradas = []
+    # Rangos por defecto para los grupos (puedes ajustar esto según tu necesidad)
+    rango_caliente = (0, 4)
+    rango_tibio = (5, 9)
+    rango_frio = (10, 19)
+    
+    for combo in combinaciones:
+        calientes = tibios = frios = congelados = 0
+        for num in combo:
+            atr = numero_a_atraso.get(str(num), -1)
+            if rango_caliente[0] <= atr <= rango_caliente[1]: calientes += 1
+            elif rango_tibio[0] <= atr <= rango_tibio[1]: tibios += 1
+            elif rango_frio[0] <= atr <= rango_frio[1]: frios += 1
+            elif atr >= 20: congelados += 1
+            
+        if (calientes == composicion_rules.get('Calientes', 0) and
+            tibios == composicion_rules.get('Tibios', 0) and
+            frios == composicion_rules.get('Fríos', 0) and
+            congelados == composicion_rules.get('Congelados', 0)):
+            filtradas.append(combo)
+    return filtradas
 
-def evaluar_individuo_deap(individuo_str, params):
-    # ... (código sin cambios)
-    pass
+def evaluar_individuo_deap(individuo, params):
+    dist_prob, num_a_atraso, num_a_freq, restricciones_finales, n_selecciones, historical_combinations_set, total_atraso, special_calc_range, freq_cv_range, sum_range, parity_counts_allowed, max_consecutive_allowed, hist_similarity_threshold, delay_cv_range = params
+    
+    if len(set(individuo)) != len(individuo): return -9999.0, # Penalizar repeticiones
+    
+    suma = sum(individuo)
+    if not (sum_range[0] <= suma <= sum_range[1]): return -100.0,
+    
+    atrasos = [num_a_atraso.get(str(n), 0) for n in individuo]
+    cv_atraso = np.std(atrasos) / np.mean(atrasos) if np.mean(atrasos) > 0 else 0
+    
+    # Fitness simple basado en estar dentro del rango de CV de atraso
+    if delay_cv_range[0] <= cv_atraso <= delay_cv_range[1]:
+        return 100.0 - abs(cv_atraso - ((delay_cv_range[0]+delay_cv_range[1])/2)),
+    return -50.0,
 
 def ejecutar_algoritmo_genetico(ga_params, backend_params):
-    # ... (código sin cambios)
-    pass
+    ga_ngen, ga_npob, ga_cxpb, ga_mutpb, dist_prob, n_selecciones = ga_params
+    numeros_validos = list(dist_prob.keys())
+    
+    toolbox = base.Toolbox()
+    toolbox.register("attr_item", random.choice, numeros_validos)
+    toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_item, n_selecciones)
+    toolbox.register("population", tools.initRepeat, list, toolbox.individual)
+    
+    toolbox.register("evaluate", evaluar_individuo_deap, params=backend_params)
+    toolbox.register("mate", tools.cxTwoPoint)
+    toolbox.register("mutate", tools.mutUniformInt, low=int(min(numeros_validos)), up=int(max(numeros_validos)), indpb=0.2)
+    toolbox.register("select", tools.selTournament, tournsize=3)
+    
+    pop = toolbox.population(n=ga_npob)
+    hof = tools.HallOfFame(1)
+    
+    try:
+        algorithms.eaSimple(pop, toolbox, cxpb=ga_cxpb, mutpb=ga_mutpb, ngen=ga_ngen, halloffame=hof, verbose=False)
+        return hof[0], pop, None
+    except Exception as e:
+        return None, None, str(e)
 
-# (Pega aquí las definiciones completas de las funciones de arriba que omití por brevedad)
-# ...
 
 # ----------------------- Interfaz Gráfica de Streamlit -----------------------
 st.set_page_config(layout="wide", page_title="Generador de Combinaciones de Precisión")
 st.title("Modelo Homeostático de Precisión")
-if 'suggested_composition' not in st.session_state: st.session_state.suggested_composition = None
 
-# ... (Todo tu código de UI para Cargar Archivos y Filtros va aquí)
-# Por favor, asegúrate de pegar toda esa sección aquí.
-# ...
+# --- INICIALIZACIÓN DE VARIABLES PARA EVITAR EL NameError ---
+df = None
+num_a_atraso = {}
+num_a_freq = {}
+dist_prob = {}
+atraso_counts = {}
+total_atraso = 0
+historical_combinations_set = []
 
-# --- SECCIÓN DE EJECUCIÓN CORREGIDA Y MEJORADA ---
+# --- 1. CARGA DE DATOS ---
+st.sidebar.header("1. Carga de Archivos")
+file_datos = st.sidebar.file_uploader("Sube tu archivo de Datos (CSV)", type=["csv"])
+file_hist = st.sidebar.file_uploader("Sube tu archivo Histórico (CSV)", type=["csv"])
+
+if file_datos:
+    df, num_a_atraso, num_a_freq, dist_prob, atrasos_disponibles_int, atraso_counts, total_atraso, atraso_stats = load_data_and_counts(file_datos)
+
+if file_hist:
+    historical_combinations_set = load_historical_combinations(file_hist)
+
+# --- 2. PARÁMETROS Y FILTROS ---
+st.sidebar.header("2. Parámetros Principales")
+n_selecciones = st.sidebar.number_input("Tamaño de la combinación (ej. 6)", min_value=3, max_value=20, value=6)
+
+with st.expander("⚙️ Parámetros de Simulación en Cascada", expanded=True):
+    col1, col2 = st.columns(2)
+    with col1:
+        sim_n_comb = st.number_input("Combinaciones por ejecución", min_value=1000, max_value=50000, value=5000)
+    with col2:
+        sim_n_ejec = st.number_input("Número de ejecuciones", min_value=1, max_value=20, value=5)
+        
+with st.expander("🧬 Parámetros del Algoritmo Genético", expanded=False):
+    c1, c2, c3, c4 = st.columns(4)
+    ga_ngen = c1.number_input("Generaciones", value=50)
+    ga_npob = c2.number_input("Población", value=100)
+    ga_cxpb = c3.slider("Prob. Cruce", 0.1, 1.0, 0.7)
+    ga_mutpb = c4.slider("Prob. Mutación", 0.01, 0.5, 0.2)
+
+with st.expander("📊 Filtros Homeostáticos", expanded=False):
+    sum_range = st.slider("Rango de Suma Permitido", 10, 300, (100, 200))
+    delay_cv_range = st.slider("Rango de CV de Atraso", 0.0, 3.0, (0.5, 1.5))
+    freq_cv_range = (0, 3.0) # Dummy si no hay UI
+    special_calc_range = (0, 1000) # Dummy
+    parity_counts_allowed = [2, 3, 4] # Dummy
+    max_consecutive_allowed = 2 # Dummy
+    hist_similarity_threshold = 4 # Dummy
+    restricciones_finales = {}
+
+with st.expander("🧩 Filtro de Composición (Etapa 2)", expanded=True):
+    st.write("Selecciona cuántos números deseas de cada grupo:")
+    c1, c2, c3, c4 = st.columns(4)
+    comp_calientes = c1.number_input("Calientes", 0, n_selecciones, 2)
+    comp_tibios = c2.number_input("Tibios", 0, n_selecciones, 2)
+    comp_frios = c3.number_input("Fríos", 0, n_selecciones, 1)
+    comp_congelados = c4.number_input("Congelados", 0, n_selecciones, 1)
+    
+    composicion_rules = {'Calientes': comp_calientes, 'Tibios': comp_tibios, 'Fríos': comp_frios, 'Congelados': comp_congelados}
+    total_count_composition = sum(composicion_rules.values())
+
+# --- 3. SECCIÓN DE EJECUCIÓN CORREGIDA Y MEJORADA ---
 st.header("3. Ejecutar Algoritmos")
+
+# AQUÍ ES DONDE OCURRÍA EL ERROR. AHORA ESTÁ PROTEGIDO Y LAS VARIABLES EXISTEN.
 if df is not None:
-    backend_params = (dist_prob, num_a_atraso, num_a_freq, restricciones_finales, n_selecciones, historical_combinations_set, total_atraso, special_calc_range, freq_cv_range, sum_range, parity_counts_allowed, max_consecutive_allowed, hist_similarity_threshold, delay_cv_range)
+    backend_params = (dist_prob, num_a_atraso, num_a_freq, restricciones_finales, n_selecciones, sim_n_comb, historical_combinations_set, total_atraso, special_calc_range, freq_cv_range, sum_range, parity_counts_allowed, max_consecutive_allowed, hist_similarity_threshold, delay_cv_range)
     
     run_col1, run_col2 = st.columns(2)
 
@@ -189,7 +310,7 @@ if df is not None:
                 st.error(err_msg)
             elif mejor_ind:
                 st.subheader("Mejor Combinación (GA)")
-                st.success(f"**Combinación: {' - '.join(map(str, mejor_ind))}**")
+                st.success(f"**Combinación: {' - '.join(map(str, sorted(mejor_ind)))}**")
                 freqs = [num_a_freq.get(str(v),0) for v in mejor_ind]
                 delays = [num_a_atraso.get(str(v),0) for v in mejor_ind]
                 st.write(f"**CV Frecuencia:** {np.std(freqs)/np.mean(freqs) if np.mean(freqs) > 0 else 0:.2f}")
@@ -200,21 +321,24 @@ if df is not None:
 
     with run_col2:
         if st.button("Ejecutar Simulación en Cascada"):
-            params_sim = (dist_prob, num_a_atraso, num_a_freq, restricciones_finales, n_selecciones, sim_n_comb, historical_combinations_set, total_atraso, special_calc_range, freq_cv_range, sum_range, parity_counts_allowed, max_consecutive_allowed, hist_similarity_threshold, delay_cv_range)
+            params_sim = backend_params
             with st.spinner("Etapa 1: Generando combinaciones..."):
                 start_time = time.time()
                 resultados = procesar_combinaciones(params_sim, sim_n_ejec)
-                st.info(f"Etapa 1: {sum(len(r) for r in resultados)} combinaciones válidas en {time.time() - start_time:.2f} s.")
+                st.info(f"Etapa 1: {sum(len(r) for r in resultados)} combinaciones generadas en {time.time() - start_time:.2f} s.")
             
             todas_unicas = list(set(tuple(int(n) for n in c) for res in resultados for c, _ in res))
-            st.info(f"**{len(todas_unicas)}** combinaciones únicas generadas.")
+            st.info(f"**{len(todas_unicas)}** combinaciones únicas válidas tras el filtro primario.")
             
             combinaciones_a_rankear = todas_unicas
+            
             if total_count_composition == n_selecciones:
                 with st.spinner("Etapa 2: Aplicando filtro de composición..."):
                     combinaciones_filtradas = filtrar_por_composicion(todas_unicas, num_a_atraso, composicion_rules)
-                st.success(f"Etapa 2: **{len(combinaciones_filtradas)}** combinaciones cumplen el perfil.")
+                st.success(f"Etapa 2: **{len(combinaciones_filtradas)}** combinaciones cumplen el perfil de composición.")
                 combinaciones_a_rankear = combinaciones_filtradas
+            else:
+                st.warning(f"Filtro de composición ignorado (La suma de los grupos es {total_count_composition}, pero debe ser exactamente {n_selecciones}).")
             
             if combinaciones_a_rankear:
                 with st.spinner("Etapa 3: Puntuando y rankeando las mejores combinaciones..."):
@@ -231,7 +355,7 @@ if df is not None:
                     }
                     
                     # Convertir keys de string a int para la función de puntuación
-                    atraso_counts_int = {int(k): v for k, v in atraso_counts.items() if k.isdigit()}
+                    atraso_counts_int = {int(k): v for k, v in atraso_counts.items() if str(k).isdigit() or isinstance(k, int)}
 
                     ranked_results = score_and_rank_combinations(
                         combinaciones_a_rankear, 
@@ -255,28 +379,23 @@ if df is not None:
 
                 st.dataframe(df_results)
             else:
-                st.warning("No quedaron combinaciones después de aplicar los filtros.")
+                st.error("No quedaron combinaciones después de aplicar los filtros.")
 else:
-    st.warning("Carga los archivos de datos para ejecutar los algoritmos.")
+    st.warning("⚠️ Sube primero tu archivo de Datos CSV en la barra lateral para poder ejecutar los algoritmos.")
 
-# ... (código del sidebar) ...
+# --- Guía Sidebar ---
+st.sidebar.markdown("---")
 st.sidebar.header("Guía del Modelo de 3 Etapas")
-
 st.sidebar.markdown("""
 Este modelo utiliza un enfoque sofisticado para identificar las combinaciones con mayor potencial.
 
 **Etapa 1: Generación y Filtrado**
-- Se crean millones de combinaciones aleatorias.
-- Se aplica un conjunto de **filtros homeostáticos y estructurales** (basados en el historial) para descartar el 99.9% de las combinaciones estadísticamente improbables.
-- El resultado es un "caldo de cultivo" de miles de candidatos de alta calidad.
+- Se crean combinaciones aleatorias.
+- Se aplica un conjunto de **filtros homeostáticos y estructurales** para descartar lo improbable.
 
 **Etapa 2: Filtrado Estratégico (Opcional)**
-- Si defines un perfil de **Composición** (ej. 2 Calientes, 3 Tibios, 1 Frío), se aplica este filtro para refinar aún más el "caldo de cultivo" a una estrategia específica.
+- Si defines un perfil de **Composición** exacto, se aplica este filtro para refinar a una estrategia específica.
 
 **Etapa 3: Puntuación y Ranking**
-- A cada combinación finalista se le asigna una **"Puntuación de Potencia"**.
-- Esta puntuación mide qué tan "perfecta" es una combinación, considerando:
-    - **Proximidad al Ideal:** Qué tan cerca están sus métricas de los promedios históricos.
-    - **Índice de Escasez:** Un bono si está formada por números de grupos de atraso poco comunes.
-- Las combinaciones se presentan en un **ranking ordenado por su Puntuación de Potencia.**
+- A cada combinación se le asigna una **"Puntuación de Potencia"** basada en cercanía al histórico y la escasez de los números.
 """)
